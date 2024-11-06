@@ -1,0 +1,170 @@
+---
+title: "Vila_Garcia_Sandra_PEC1"
+author: "Sandra Vila Garcia"
+date: "2024-11-04"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r}
+# Cargamos las librerías necesarias
+library(SummarizedExperiment)
+
+# Importamos los datos del data set elegido
+data <- read.csv("C:/Users/sandr/Downloads/human_cachexia.csv")
+
+# Verificamos los nombres de las columnas
+print(colnames(data))
+
+# Vamos a crear el objeto assayData
+# Primero excluimos las dos primeras columnas ('Patient.ID' y 'Muscle.loss') y lo convertimos a matriz
+assayData <- as.matrix(data[, -c(1, 2)])  
+
+# Verificamos el número de columnas en assayData
+num_samples <- ncol(assayData)
+cat("Número de muestras (columnas) en assayData:", num_samples, "\n")
+
+# Creamos colData solo con las muestras
+colData <- data.frame(
+  PatientID = as.character(data[["Patient.ID"]]),  # Convertimos a carácter
+  MuscleLoss = as.factor(data[["Muscle.loss"]])   # Convertimos a factor
+)
+
+# Comprobamos que el número de filas en colData coincida con num_samples
+if (nrow(colData) != nrow(data)) {
+  stop("El número de filas en colData debe coincidir con el número de muestras en assayData.")
+}
+
+# Reducimos colData para que coincida con el número de muestras en assayData
+colData <- colData[1:num_samples, ]  # Seleccionar solo las filas correspondientes a las muestras
+
+# Verificamos las dimensiones
+cat("Dimensiones de assayData:", dim(assayData), "\n")  # Debe ser [número de metabolitos] x [número de muestras]
+cat("Dimensiones de colData:", dim(colData), "\n")  # Debe ser [número de muestras] x 2
+
+# Y ya podemos crear el objeto SummarizedExperiment
+se <- SummarizedExperiment(assays = list(counts = assayData), colData = colData)
+
+# Guardamos el objeto en formato binario
+save(se, file = "human_cachexia.Rda")
+
+
+```
+```{r}
+# Resumen del objeto SummarizedExperiment
+summary(se)
+
+# Obtenemos también un resumen estadístico de los metabolitos
+rowMeans(assay(se), na.rm = TRUE)  # Promedio de cada metabolito
+
+```
+
+```{r}
+library(ggplot2)
+
+# Convertimos a formato largo para ggplot
+assay_long <- as.data.frame(t(assay(se)))
+assay_long$MuscleLoss <- colData(se)$MuscleLoss
+
+# Convertimos a formato largo utilizando reshape2
+library(reshape2)
+assay_long <- melt(assay_long, id.vars = "MuscleLoss", variable.name = "Metabolite", value.name = "Value")
+
+# Creamos boxplots para los metabolitos
+ggplot(assay_long, aes(x = MuscleLoss, y = Value, fill = MuscleLoss)) +
+  geom_boxplot() +
+  facet_wrap(~Metabolite, scales = "free") +
+  labs(title = "Boxplots de Metabolitos por Grupo",
+       x = "Grupo",
+       y = "Valor") +
+  theme_minimal()
+
+```
+```{r}
+# Realizamos un PCA
+pca <- prcomp(t(assay(se)), scale. = TRUE)  # Transponemos para que las muestras estén en filas
+pca_df <- data.frame(pca$x)
+pca_df$MuscleLoss <- colData(se)$MuscleLoss
+
+# Gráfica de PCA
+ggplot(pca_df, aes(x = PC1, y = PC2, color = MuscleLoss)) +
+  geom_point(size = 3) +
+  labs(title = "Análisis de Componentes Principales",
+       x = "PC1",
+       y = "PC2") +
+  theme_minimal()
+
+```
+
+```{r}
+library(pheatmap)
+
+# Creamos un mapa de calor
+pheatmap(assay(se), 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         show_rownames = TRUE,
+         show_colnames = TRUE,
+         annotation_col = as.data.frame(colData(se)),
+         main = "Mapa de Calor de Metabolitos")
+
+```
+
+
+
+```{r}
+# Convertimos los datos de assay a enteros
+assay(se) <- round(assay(se))
+
+# Verificamos que los datos son ahora enteros
+is_integer <- all(assay(se) == floor(assay(se)))
+if (!is_integer) {
+  stop("Algunos datos no son enteros, revise la conversión.")
+}
+
+```
+
+```{r}
+# Cargamos la librería
+library(DESeq2)
+
+
+# Ajustamos el nivel de referencia de MuscleLoss
+se$MuscleLoss <- relevel(se$MuscleLoss, ref = "control")  # Cambia "control" por el nivel que desees usar como referencia
+
+# Creamos el objeto DESeqDataSet
+dds <- DESeqDataSet(se, design = ~ MuscleLoss)
+
+# Continuamos con el análisis diferencial
+dds <- DESeq(dds)
+results <- results(dds)
+
+summary (results)
+
+```
+
+```{r}
+# Filtramos los metabolitos que tienen un LFC positivo (más altos en cachexic que en control)
+upregulated <- results[results$log2FoldChange > 0 & results$padj < 0.1, ]
+# Filtramos los metabolitos que tienen un LFC negativo (más bajos en cachexic que en control)
+downregulated <- results[results$log2FoldChange < 0 & results$padj < 0.1, ]
+
+```
+
+```{r}
+# Mostrar los metabolitos que están regulados al alza
+print("Metabolitos regulados al alza:")
+print(upregulated)
+
+# Mostrar los metabolitos que están regulados a la baja
+print("Metabolitos regulados a la baja:")
+print(downregulated)
+
+```
+
+
+
+
